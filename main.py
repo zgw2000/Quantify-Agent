@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 import json
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.preprocessing import StandardScaler
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import train_test_split, RandomizedSearchCV
 
 # -----------------------------
 # Config - Hybrid Adaptive ML Strategy (Optimized)
@@ -28,6 +28,13 @@ SPX_TICKER = "^GSPC"
 TARGET_TICKER = "TQQQ"
 MAX_RETRIES = 3
 RETRY_SLEEP_SEC = 10
+
+# 风险与再平衡约束（避免无止境加仓）
+MAX_EXPOSURE = 1.0            # 组合最大目标敞口（仓位/净值）
+REBALANCE_TOLERANCE = 0.03    # 目标敞口偏离超过此阈值才行动（减少过度交易）
+MAX_TRADE_PORTFOLIO_PCT = 0.25 # 单日最大交易额不超过净值的比例
+TRANSACTION_COST_BPS = 5      # 单边交易成本（基点）
+SIGMOID_TEMP = 0.75           # 信号映射温度参数，越小越激进
 
 # 新增优化参数
 MOMENTUM_LOOKBACK = 5  # 动量回看期
@@ -253,9 +260,30 @@ def train_ml_model(features: pd.DataFrame, target: pd.Series, train_size: float 
     X_train_scaled = scaler.fit_transform(X_train)
     X_test_scaled = scaler.transform(X_test)
     
-    # 训练模型
-    model = RandomForestRegressor(n_estimators=100, random_state=42, n_jobs=-1)
-    model.fit(X_train_scaled, y_train)
+    # 训练模型（带随机搜索的轻量优化）
+    base_model = RandomForestRegressor(random_state=42, n_jobs=-1)
+    param_dist = {
+        'n_estimators': [200, 400, 600],
+        'max_depth': [None, 8, 12, 20],
+        'min_samples_split': [2, 5, 10],
+        'min_samples_leaf': [1, 2, 4],
+        'max_features': ['sqrt', None]
+    }
+    try:
+        search = RandomizedSearchCV(
+            estimator=base_model,
+            param_distributions=param_dist,
+            n_iter=10,
+            cv=3,
+            random_state=42,
+            n_jobs=-1,
+            verbose=0,
+        )
+        search.fit(X_train_scaled, y_train)
+        model = search.best_estimator_
+    except Exception:
+        model = RandomForestRegressor(n_estimators=400, random_state=42, n_jobs=-1)
+        model.fit(X_train_scaled, y_train)
     
     print(f"ML模型训练完成 - 训练集: {len(X_train)}, 测试集: {len(X_test)}")
     print(f"训练集R²: {model.score(X_train_scaled, y_train):.3f}")
@@ -320,6 +348,7 @@ position_shares = 0.0
 portfolio_values = []
 entry_log = []
 ml_predictions = []
+target_exposures = []
 market_states = []
 signals = []
 
@@ -335,6 +364,8 @@ print(f"ML买入阈值: {ML_BUY_THRESHOLD}, ML卖出阈值: {ML_SELL_THRESHOLD}"
 
 for i, date in enumerate(common_index):
     price = float(tqqq_close.loc[date])
+    # 每次迭代初始化目标敞口，避免变量遗留
+    target_exposure = 0.0
     
     # 获取当前特征
     if i < 50:  # 需要足够的历史数据
@@ -349,11 +380,11 @@ for i, date in enumerate(common_index):
                 market_state = "Sideways"
                 signal = 0
             else:
-                # ML预测
+                # ML预测（预测未来5日收益率）
                 features_scaled = scaler.transform(current_features)
-                ml_prob = ml_model.predict(features_scaled)[0]
-                ml_prob = max(0.1, min(0.9, ml_prob + 0.5))  # 转换为0-1概率
-                
+                ml_pred5 = float(ml_model.predict(features_scaled)[0])  # 预测的5日收益
+                ml_pred5 = float(np.clip(ml_pred5, -0.30, 0.30))  # 裁剪极端值
+
                 # 市场状态
                 market_state = get_market_state(features.loc[:date])
                 
@@ -364,64 +395,101 @@ for i, date in enumerate(common_index):
                     trend_signal = 1 if price > ma_short > ma_long else (-1 if price < ma_short < ma_long else 0)
                 except:
                     trend_signal = 0
-                
-                # 综合信号
-                if ml_prob > ML_BUY_THRESHOLD and trend_signal >= 0:
-                    signal = 1  # 买入
-                elif ml_prob < ML_SELL_THRESHOLD and trend_signal <= 0:
-                    signal = -1  # 卖出
+
+                # 风险调整信号→目标敞口（0-1）
+                try:
+                    vol20 = float(features.loc[:date]['volatility_20'].iloc[-1])
+                except Exception:
+                    vol20 = 0.02
+                vol20 = 0.02 if np.isnan(vol20) or vol20 <= 0 else vol20
+                risk_adj_signal = ml_pred5 / (vol20 * np.sqrt(5))
+                risk_adj_signal = float(np.clip(risk_adj_signal, -5.0, 5.0))
+
+                # 概率映射到[0,1]，再转换目标敞口
+                ml_prob = 1.0 / (1.0 + np.exp(-risk_adj_signal / SIGMOID_TEMP))
+
+                # 目标敞口基础值
+                target_exposure = ml_prob
+                # 趋势加减成分
+                if trend_signal < 0:
+                    target_exposure *= 0.75
+                elif trend_signal > 0:
+                    target_exposure *= 1.10
+                # 全局上限
+                target_exposure = float(np.clip(target_exposure, 0.0, MAX_EXPOSURE))
+                # 记录一个简化信号用于统计
+                if target_exposure - 0.5 > REBALANCE_TOLERANCE:
+                    signal = 1
+                elif 0.5 - target_exposure > REBALANCE_TOLERANCE:
+                    signal = -1
                 else:
-                    signal = 0  # 持有
+                    signal = 0
         except Exception as e:
             print(f"特征处理错误: {e}")
             ml_prob = 0.5
             market_state = "Sideways"
             signal = 0
     
-    # 执行交易
-    if signal == 1 and cash > 0:  # 买入信号
-        # 计算动态仓位大小 - 超激进版本
-        # 基于ML概率动态调整仓位
-        ml_confidence = abs(ml_prob - 0.5) * 2  # 0-1之间的置信度
-        position_multiplier = 1.0 + ml_confidence * 0.5  # 1.0-1.5倍仓位
-        
-        # 最终仓位计算 - 超激进
-        position_size = min(cash * 0.95, cash * VOLATILITY_TARGET * position_multiplier * 1.5)  # 增加50%基础仓位
-        shares_to_buy = position_size / price
-        position_shares += shares_to_buy
-        cash -= position_size
-        
-        entry_log.append({
-            'date': date,
-            'type': 'buy',
-            'price': price,
-            'amount': position_size,
-            'shares': shares_to_buy,
-            'ml_prob': ml_prob,
-            'market_state': market_state,
-        })
-        print(f"买入: {date.strftime('%Y-%m-%d')} @ ${price:.2f}, ML概率{ml_prob:.3f}, 市场状态{market_state}, 金额${position_size:,.2f}")
-        
-    elif signal == -1 and position_shares > 0:  # 卖出信号
-        # 超激进卖出策略
-        ml_confidence = abs(ml_prob - 0.5) * 2  # 0-1之间的置信度
-        base_sell_ratio = min(1.0, (ML_SELL_THRESHOLD - ml_prob) / ML_SELL_THRESHOLD + 0.7)  # 增加基础卖出比例
-        sell_multiplier = 1.0 + ml_confidence * 0.3  # 1.0-1.3倍卖出
-        shares_to_sell = position_shares * min(base_sell_ratio * sell_multiplier, 0.9)  # 更激进的卖出
-        proceeds = shares_to_sell * price
-        position_shares -= shares_to_sell
-        cash += proceeds
-        
-        entry_log.append({
-            'date': date,
-            'type': 'sell',
-            'price': price,
-            'amount': proceeds,
-            'shares': -shares_to_sell,
-            'ml_prob': ml_prob,
-            'market_state': market_state,
-        })
-        print(f"卖出: {date.strftime('%Y-%m-%d')} @ ${price:.2f}, ML概率{ml_prob:.3f}, 市场状态{market_state}, 回笼${proceeds:,.2f}")
+    # 执行交易（基于目标敞口的再平衡，避免无止境加仓）
+    portfolio_value_now = cash + position_shares * price
+    position_value_now = position_shares * price
+    current_exposure = (position_value_now / portfolio_value_now) if portfolio_value_now > 0 else 0.0
+
+    # 起始阶段已在迭代开头初始化
+
+    desired_position_value = target_exposure * portfolio_value_now
+    delta_value = desired_position_value - position_value_now
+
+    # 单日最大交易额限制
+    max_trade_value_today = MAX_TRADE_PORTFOLIO_PCT * portfolio_value_now
+
+    # 只有当偏离超过容差才调整
+    if delta_value > portfolio_value_now * REBALANCE_TOLERANCE and cash > 0:
+        trade_value = min(delta_value, cash, max_trade_value_today)
+        if trade_value > 0:
+            shares_to_buy = trade_value / price
+            position_shares += shares_to_buy
+            # 交易成本
+            fee = trade_value * TRANSACTION_COST_BPS / 10000.0
+            cash -= (trade_value + fee)
+            entry_log.append({
+                'date': date,
+                'type': 'buy',
+                'price': price,
+                'amount': -trade_value,
+                'shares': shares_to_buy,
+                'ml_prob': ml_prob,
+                'market_state': market_state,
+                'cash_after': cash,
+                'shares_after': position_shares,
+                'portfolio_after': cash + position_shares * price,
+                'target_exposure': target_exposure,
+                'fee': fee,
+            })
+            print(f"买入(再平衡): {date.strftime('%Y-%m-%d')} @ ${price:.2f}, 目标敞口{target_exposure:.2f}, 金额${trade_value:,.2f}")
+    elif delta_value < -portfolio_value_now * REBALANCE_TOLERANCE and position_shares > 0:
+        trade_value = min(-delta_value, position_value_now, max_trade_value_today)
+        if trade_value > 0:
+            shares_to_sell = trade_value / price
+            proceeds = trade_value
+            fee = proceeds * TRANSACTION_COST_BPS / 10000.0
+            position_shares -= shares_to_sell
+            cash += (proceeds - fee)
+            entry_log.append({
+                'date': date,
+                'type': 'sell',
+                'price': price,
+                'amount': proceeds,
+                'shares': -shares_to_sell,
+                'ml_prob': ml_prob,
+                'market_state': market_state,
+                'cash_after': cash,
+                'shares_after': position_shares,
+                'portfolio_after': cash + position_shares * price,
+                'target_exposure': target_exposure,
+                'fee': fee,
+            })
+            print(f"卖出(再平衡): {date.strftime('%Y-%m-%d')} @ ${price:.2f}, 目标敞口{target_exposure:.2f}, 回笼${proceeds:,.2f}")
 
     # 记录序列
     dates_seq.append(date)
@@ -430,6 +498,7 @@ for i, date in enumerate(common_index):
     shares_seq.append(position_shares)
     portfolio_values.append(cash + position_shares * price)
     ml_predictions.append(ml_prob)
+    target_exposures.append(target_exposure)
     market_states.append(market_state)
     signals.append(signal)
 
@@ -462,8 +531,11 @@ if portfolio_values:
         'tqqq_price': price_seq,
         'cash': cash_seq,
         'shares': shares_seq,
+        'position_value': np.array(shares_seq) * np.array(price_seq),
         'portfolio_value': portfolio_values,
+        'exposure': np.divide(np.array(shares_seq) * np.array(price_seq), np.array(portfolio_values), out=np.zeros_like(np.array(portfolio_values), dtype=float), where=(np.array(portfolio_values) != 0)),
         'ml_probability': ml_predictions,
+        'target_exposure': target_exposures,
         'market_state': market_states,
         'signal': signals,
     })
