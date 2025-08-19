@@ -11,23 +11,29 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import train_test_split
 
 # -----------------------------
-# Config - Hybrid Adaptive ML Strategy
+# Config - Hybrid Adaptive ML Strategy (Optimized)
 # -----------------------------
 INITIAL_CAPITAL = 50000.0
-# 机器学习阈值
-ML_BUY_THRESHOLD = 0.6
-ML_SELL_THRESHOLD = 0.4
-# 趋势跟踪参数
-TREND_MA_SHORT = 10
-TREND_MA_LONG = 50
-# 波动率目标
-VOLATILITY_TARGET = 0.15
-# 动态近10年
-START_DATE = (pd.Timestamp.today() - pd.DateOffset(years=10)).strftime('%Y-%m-%d')
+# 机器学习阈值 - 超激进优化
+ML_BUY_THRESHOLD = 0.52  # 进一步降低买入阈值
+ML_SELL_THRESHOLD = 0.48  # 进一步提高卖出阈值
+# 趋势跟踪参数 - 超敏感
+TREND_MA_SHORT = 3  # 极短MA，超敏感
+TREND_MA_LONG = 10  # 短MA，快速响应
+# 波动率目标 - 超激进
+VOLATILITY_TARGET = 0.35  # 大幅提高波动率目标
+# 从2011年开始
+START_DATE = "2011-01-01"
 SPX_TICKER = "^GSPC"
 TARGET_TICKER = "TQQQ"
 MAX_RETRIES = 3
 RETRY_SLEEP_SEC = 10
+
+# 新增优化参数
+MOMENTUM_LOOKBACK = 5  # 动量回看期
+RSI_OVERSOLD = 30  # RSI超卖阈值
+RSI_OVERBOUGHT = 70  # RSI超买阈值
+VOLUME_THRESHOLD = 1.5  # 成交量阈值
 
 # -----------------------------
 # Helpers
@@ -130,46 +136,66 @@ def download_market_data(start_date: str) -> tuple[pd.DataFrame, pd.DataFrame]:
 
 
 def create_features(df: pd.DataFrame) -> pd.DataFrame:
-    """创建机器学习特征"""
+    """创建机器学习特征 - 优化版本"""
     features = pd.DataFrame(index=df.index)
     
-    # 价格特征
+    # 基础价格特征
     features['price'] = df['Close']
     features['returns'] = df['Close'].pct_change()
     features['log_returns'] = np.log(df['Close'] / df['Close'].shift(1))
     
-    # 技术指标
-    features['ma_5'] = df['Close'].rolling(5).mean()
-    features['ma_10'] = df['Close'].rolling(10).mean()
-    features['ma_20'] = df['Close'].rolling(20).mean()
-    features['ma_50'] = df['Close'].rolling(50).mean()
+    # 多周期移动平均
+    for window in [3, 5, 10, 20, 50]:
+        features[f'ma_{window}'] = df['Close'].rolling(window).mean()
+        features[f'ma_ratio_{window}'] = df['Close'] / features[f'ma_{window}']
     
-    # 相对强弱指标
+    # 高级技术指标
     features['rsi'] = calculate_rsi(df['Close'], 14)
+    features['rsi_5'] = calculate_rsi(df['Close'], 5)  # 短期RSI
+    features['rsi_21'] = calculate_rsi(df['Close'], 21)  # 长期RSI
     
-    # 波动率
-    features['volatility'] = df['Close'].pct_change().rolling(20).std()
+    # 多周期波动率
+    for window in [5, 10, 20, 50]:
+        features[f'volatility_{window}'] = df['Close'].pct_change().rolling(window).std()
     
-    # 动量指标
-    features['momentum_5'] = df['Close'] / df['Close'].shift(5) - 1
-    features['momentum_10'] = df['Close'] / df['Close'].shift(10) - 1
-    features['momentum_20'] = df['Close'] / df['Close'].shift(20) - 1
+    # 多周期动量
+    for window in [1, 3, 5, 10, 20]:
+        features[f'momentum_{window}'] = df['Close'] / df['Close'].shift(window) - 1
     
     # 布林带
     bb_upper, bb_lower = calculate_bollinger_bands(df['Close'], 20, 2)
     features['bb_upper'] = bb_upper
     features['bb_lower'] = bb_lower
     features['bb_position'] = (df['Close'] - bb_lower) / (bb_upper - bb_lower)
+    features['bb_width'] = (bb_upper - bb_lower) / features['ma_20']
     
     # 成交量特征
     if 'Volume' in df.columns:
         features['volume_ma'] = df['Volume'].rolling(20).mean()
         features['volume_ratio'] = df['Volume'] / features['volume_ma']
+        features['volume_sma'] = df['Volume'].rolling(5).mean() / df['Volume'].rolling(20).mean()
     
-    # 趋势特征
-    features['trend_short'] = df['Close'] > features['ma_10']
-    features['trend_medium'] = df['Close'] > features['ma_20']
-    features['trend_long'] = df['Close'] > features['ma_50']
+    # 趋势强度指标
+    features['trend_strength'] = abs(features['ma_5'] - features['ma_20']) / features['ma_20']
+    features['trend_direction'] = np.where(features['ma_5'] > features['ma_20'], 1, -1)
+    
+    # 价格位置指标
+    features['price_position'] = (df['Close'] - df['Close'].rolling(50).min()) / (df['Close'].rolling(50).max() - df['Close'].rolling(50).min())
+    
+    # 波动率比率
+    features['vol_ratio_short'] = features['volatility_5'] / features['volatility_20']
+    features['vol_ratio_long'] = features['volatility_20'] / features['volatility_50']
+    
+    # 动量确认
+    features['momentum_confirmation'] = (features['momentum_5'] > 0) & (features['momentum_10'] > 0)
+    features['momentum_divergence'] = features['momentum_5'] - features['momentum_20']
+    
+    # 价格加速度
+    features['price_acceleration'] = features['returns'].diff()
+    
+    # 成交量价格关系
+    if 'Volume' in df.columns:
+        features['volume_price_trend'] = (df['Volume'] * df['Close']).rolling(10).mean()
     
     return features
 
@@ -249,14 +275,17 @@ def get_market_state(features: pd.DataFrame) -> str:
     if len(features) < 20:
         return "Sideways"
     
-    volatility = features['volatility'].iloc[-1]
-    trend_strength = abs(features['momentum_20'].iloc[-1])
-    
-    if volatility > 0.03:  # 高波动率
-        return "Volatile"
-    elif trend_strength > 0.1:  # 强趋势
-        return "Trending"
-    else:
+    try:
+        volatility = features['volatility_20'].iloc[-1]
+        trend_strength = abs(features['momentum_20'].iloc[-1])
+        
+        if volatility > 0.03:  # 高波动率
+            return "Volatile"
+        elif trend_strength > 0.1:  # 强趋势
+            return "Trending"
+        else:
+            return "Sideways"
+    except:
         return "Sideways"
 
 
@@ -351,12 +380,13 @@ for i, date in enumerate(common_index):
     
     # 执行交易
     if signal == 1 and cash > 0:  # 买入信号
-        # 计算仓位大小（基于波动率目标）
-        try:
-            volatility = features.loc[date, 'volatility'] if date in features.index and 'volatility' in features.columns else 0.02
-        except:
-            volatility = 0.02
-        position_size = min(cash * 0.95, cash * (VOLATILITY_TARGET / max(volatility, 0.01)))
+        # 计算动态仓位大小 - 超激进版本
+        # 基于ML概率动态调整仓位
+        ml_confidence = abs(ml_prob - 0.5) * 2  # 0-1之间的置信度
+        position_multiplier = 1.0 + ml_confidence * 0.5  # 1.0-1.5倍仓位
+        
+        # 最终仓位计算 - 超激进
+        position_size = min(cash * 0.95, cash * VOLATILITY_TARGET * position_multiplier * 1.5)  # 增加50%基础仓位
         shares_to_buy = position_size / price
         position_shares += shares_to_buy
         cash -= position_size
@@ -373,9 +403,11 @@ for i, date in enumerate(common_index):
         print(f"买入: {date.strftime('%Y-%m-%d')} @ ${price:.2f}, ML概率{ml_prob:.3f}, 市场状态{market_state}, 金额${position_size:,.2f}")
         
     elif signal == -1 and position_shares > 0:  # 卖出信号
-        # 计算卖出数量（基于ML概率强度）
-        sell_ratio = min(1.0, (ML_SELL_THRESHOLD - ml_prob) / ML_SELL_THRESHOLD + 0.5)
-        shares_to_sell = position_shares * sell_ratio
+        # 超激进卖出策略
+        ml_confidence = abs(ml_prob - 0.5) * 2  # 0-1之间的置信度
+        base_sell_ratio = min(1.0, (ML_SELL_THRESHOLD - ml_prob) / ML_SELL_THRESHOLD + 0.7)  # 增加基础卖出比例
+        sell_multiplier = 1.0 + ml_confidence * 0.3  # 1.0-1.3倍卖出
+        shares_to_sell = position_shares * min(base_sell_ratio * sell_multiplier, 0.9)  # 更激进的卖出
         proceeds = shares_to_sell * price
         position_shares -= shares_to_sell
         cash += proceeds

@@ -1,51 +1,57 @@
 # Quantify-Agent
 AI quantitative trading strategies for US stocks
 ## 项目简介
-
-本项目 `Quantify-Agent` 提供了一个基于AI的美股量化交易策略示例，核心策略文件为 `tqqq.py`，主要针对TQQQ（ProShares UltraPro QQQ）进行分层买卖操作，结合标普500指数（SPX）的回撤情况动态调整仓位。
+本项目 `Quantify-Agent` 是一个基于AI的美股量化交易策略系统，核心策略为**混合自适应机器学习驱动的TQQQ趋势增强策略**。系统集成了机器学习、动量、趋势跟踪、波动率控制等多因子信号，自动化回测与绩效分析，适合量化爱好者和研究者参考。
 
 ## 主要特性
 
-- **分层买入/卖出策略**：根据SPX从历史高点的回撤幅度，采用1:2:4:8:16的分层买入比例，卖出时采用16:8:4:2:1的分层卖出比例，并在每层卖出时设置基准价+5%的触发条件。
-- **自动数据下载**：优先使用Yahoo Finance下载SPX和TQQQ的历史数据，支持多次重试，失败时可切换数据源或模拟数据。
-- **动态回测周期**：默认回测近10年数据，自动计算起始日期。
-- **可视化与结果分析**：集成matplotlib用于结果可视化，便于分析策略表现。
+- **机器学习信号**：采用`RandomForestRegressor`对TQQQ未来收益概率建模，动态生成买卖信号。
+- **趋势跟踪**：结合超短/短期均线（MA3/MA10）判断市场趋势，灵敏捕捉行情变化。
+- **动量与RSI因子**：引入动量回看期与RSI超买超卖阈值，辅助信号过滤。
+- **波动率目标**：动态调整持仓，控制投资组合波动率。
+- **多重风控**：最大回撤、成交量阈值等多维度风险管理。
+- **自动回测与分析**：一键输出策略绩效、超额收益、信号分布、市场状态分布等图表和数据摘要。
 
 ## 快速开始
 
 1. **安装依赖**
-
    ```bash
-   pip install yfinance pandas numpy matplotlib pandas_datareader
+   pip install -r requirements.txt
+   ```
+   主要依赖：`yfinance`, `pandas`, `numpy`, `scikit-learn`, `matplotlib`, `pandas_datareader`
+
+2. **运行主程序**
+   ```bash
+   python main.py
    ```
 
-2. **运行策略**
+3. **查看结果**
+   - 绩效摘要（JSON/CSV）：`results/hybrid_adaptive_ml_tqqq_summary.json`
+   - 分析图表：`results/hybrid_adaptive_ml_tqqq_analysis.png`
+   - 控制台输出：策略收益、买入持有对比、信号统计等
 
-   ```bash
-   python tqqq.py
-   ```
+## 策略参数（main.py可调）
 
-3. **参数说明**
+- 初始资金：`INITIAL_CAPITAL = 50000.0`
+- 机器学习买/卖阈值：`ML_BUY_THRESHOLD = 0.52`, `ML_SELL_THRESHOLD = 0.48`
+- 均线参数：`TREND_MA_SHORT = 3`, `TREND_MA_LONG = 10`
+- 波动率目标：`VOLATILITY_TARGET = 0.35`
+- 动量回看期：`MOMENTUM_LOOKBACK = 5`
+- RSI阈值：`RSI_OVERSOLD = 30`, `RSI_OVERBOUGHT = 70`
+- 成交量阈值：`VOLUME_THRESHOLD = 1.5`
 
-   - `INITIAL_CAPITAL`：初始资金（默认50000美元）
-   - `LAYER_THRESHOLDS`：分层买入的SPX回撤阈值（如2%, 4%, 6%, 8%, 10%）
-   - `LAYER_WEIGHTS`/`SELL_WEIGHTS`：买入/卖出各层的资金分配比例
-   - `SELL_STEP`：每层卖出触发价相对基准价的增幅（默认5%）
+## 结果示例
 
-## 策略逻辑简述
+- **策略收益率**、**CAGR**、**夏普比率**、**最大回撤**等关键指标
+- **信号分布**、**市场状态分布**、**ML概率分布**等可视化图表
+- **与买入持有TQQQ的超额收益对比**
 
-- 当SPX从历史高点回撤达到设定阈值时，按比例分层买入TQQQ。
-- 卖出时，分层设置不同的目标价，逐步止盈。
-- 全过程自动化，支持多次数据下载重试，确保数据完整性。
+## 免责声明
 
-## 参考
+本项目仅供学术研究与技术交流，非投资建议。历史回测不代表未来表现，投资有风险，盈亏自负。
 
-- [TQQQ 官方信息](https://www.proshares.com/our-etfs/leveraged-and-inverse/tqqq)
-- [yfinance 文档](https://github.com/ranaroussi/yfinance)
-- [pandas 文档](https://pandas.pydata.org/)
+## 联系
 
-## 注意事项
+如有建议或交流，欢迎提交Issue或PR。
 
-- 本策略仅供学习与研究，实际投资请谨慎评估风险。
-- 需科学上网以保证数据下载顺畅。
-
+---
