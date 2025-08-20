@@ -6,9 +6,10 @@ from pandas_datareader import data as pdr
 import os
 import matplotlib.pyplot as plt
 import json
-from sklearn.ensemble import RandomForestRegressor
+from sklearn.ensemble import RandomForestRegressor, ExtraTreesRegressor, GradientBoostingRegressor
 from sklearn.preprocessing import StandardScaler
-from sklearn.model_selection import train_test_split, RandomizedSearchCV
+from sklearn.model_selection import train_test_split, RandomizedSearchCV, TimeSeriesSplit
+from sklearn.metrics import make_scorer
 
 # -----------------------------
 # Config - Hybrid Adaptive ML Strategy (Optimized)
@@ -226,8 +227,8 @@ def calculate_bollinger_bands(prices: pd.Series, window: int = 20, num_std: floa
     return upper, lower
 
 
-def train_ml_model(features: pd.DataFrame, target: pd.Series, train_size: float = 0.7) -> tuple[RandomForestRegressor, StandardScaler]:
-    """训练机器学习模型"""
+def train_ml_model(features: pd.DataFrame, target: pd.Series, train_size: float = 0.7) -> tuple[object, StandardScaler]:
+    """训练机器学习模型（时间序列CV + 多模型择优）"""
     # 准备数据
     features_clean = features.dropna()
     target_clean = target.loc[features_clean.index]
@@ -260,42 +261,103 @@ def train_ml_model(features: pd.DataFrame, target: pd.Series, train_size: float 
     X_train_scaled = scaler.fit_transform(X_train)
     X_test_scaled = scaler.transform(X_test)
     
-    # 训练模型（带随机搜索的轻量优化）
-    base_model = RandomForestRegressor(random_state=42, n_jobs=-1)
-    param_dist = {
-        'n_estimators': [200, 400, 600],
-        'max_depth': [None, 8, 12, 20],
-        'min_samples_split': [2, 5, 10],
-        'min_samples_leaf': [1, 2, 4],
-        'max_features': ['sqrt', None]
-    }
-    try:
-        search = RandomizedSearchCV(
-            estimator=base_model,
-            param_distributions=param_dist,
-            n_iter=10,
-            cv=3,
-            random_state=42,
-            n_jobs=-1,
-            verbose=0,
-        )
-        search.fit(X_train_scaled, y_train)
-        model = search.best_estimator_
-    except Exception:
-        model = RandomForestRegressor(n_estimators=400, random_state=42, n_jobs=-1)
-        model.fit(X_train_scaled, y_train)
-    
+    # 自定义评分：结合相关性与方向一致性，更贴近收益目标
+    def corr_sign_score(y_true, y_pred) -> float:
+        y_true = np.asarray(y_true)
+        y_pred = np.asarray(y_pred)
+        if y_true.size == 0 or y_pred.size == 0:
+            return 0.0
+        if np.std(y_true) == 0 or np.std(y_pred) == 0:
+            return 0.0
+        corr = np.corrcoef(y_true, y_pred)[0, 1]
+        corr = 0.0 if np.isnan(corr) else corr
+        sign_acc = np.mean((y_true > 0) == (y_pred > 0))
+        # 将方向准确率映射到 [-1,1] 再加权
+        signed_acc = 2.0 * sign_acc - 1.0
+        return 0.7 * corr + 0.3 * signed_acc
+
+    scorer = make_scorer(corr_sign_score, greater_is_better=True)
+
+    # 时间序列交叉验证（仅在训练集上调参，避免窥视测试集）
+    tscv = TimeSeriesSplit(n_splits=5)
+
+    candidates = [
+        (
+            'RandomForest',
+            RandomForestRegressor(random_state=42, n_jobs=-1),
+            {
+                'n_estimators': [200, 400, 600],
+                'max_depth': [None, 8, 12, 20],
+                'min_samples_split': [2, 5, 10],
+                'min_samples_leaf': [1, 2, 4],
+                'max_features': ['sqrt', None]
+            },
+        ),
+        (
+            'ExtraTrees',
+            ExtraTreesRegressor(random_state=42, n_jobs=-1),
+            {
+                'n_estimators': [300, 600, 900],
+                'max_depth': [None, 8, 12, 20],
+                'min_samples_split': [2, 5, 10],
+                'min_samples_leaf': [1, 2, 4],
+                'max_features': ['sqrt', None]
+            },
+        ),
+        (
+            'GBRT',
+            GradientBoostingRegressor(random_state=42),
+            {
+                'n_estimators': [200, 400, 800],
+                'learning_rate': [0.01, 0.03, 0.1],
+                'max_depth': [2, 3, 4],
+                'subsample': [0.6, 0.8, 1.0]
+            },
+        ),
+    ]
+
+    best_model = None
+    best_name = ''
+    best_cv_score = -1e9
+
+    for name, est, grid in candidates:
+        try:
+            search = RandomizedSearchCV(
+                estimator=est,
+                param_distributions=grid,
+                n_iter=10,
+                cv=tscv,
+                random_state=42,
+                n_jobs=-1,
+                verbose=0,
+                scoring=scorer,
+                refit=True,
+            )
+            search.fit(X_train_scaled, y_train)
+            if search.best_score_ > best_cv_score:
+                best_cv_score = search.best_score_
+                best_model = search.best_estimator_
+                best_name = name
+        except Exception as e:
+            print(f"模型 {name} 搜索失败: {e}")
+
+    if best_model is None:
+        print("模型搜索失败，回退到默认RandomForest。")
+        best_model = RandomForestRegressor(n_estimators=400, random_state=42, n_jobs=-1)
+        best_model.fit(X_train_scaled, y_train)
+
     print(f"ML模型训练完成 - 训练集: {len(X_train)}, 测试集: {len(X_test)}")
-    print(f"训练集R²: {model.score(X_train_scaled, y_train):.3f}")
-    
-    # 安全地计算测试集R²
+    print(f"CV最佳模型: {best_name}, CV得分: {best_cv_score:.4f}")
+
+    # 计算测试集上的综合评分
     try:
-        test_score = model.score(X_test_scaled, y_test)
-        print(f"测试集R²: {test_score:.3f}")
+        y_pred_test = best_model.predict(X_test_scaled)
+        test_score = corr_sign_score(y_test, y_pred_test)
+        print(f"测试集综合评分(相关性+方向): {test_score:.4f}")
     except Exception as e:
-        print(f"测试集R²计算失败: {e}")
+        print(f"测试集评分计算失败: {e}")
     
-    return model, scaler
+    return best_model, scaler
 
 
 def get_market_state(features: pd.DataFrame) -> str:
