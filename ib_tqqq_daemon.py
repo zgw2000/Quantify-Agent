@@ -4,6 +4,7 @@ import time
 from typing import Optional
 
 from ib_tqqq_trader import RunConfig, run_once_rebalance
+from ib_dump_executions import dump_executions_and_append, yyyymmdd_hhmmss_et_start_of_day
 
 try:
     from zoneinfo import ZoneInfo  # Python 3.9+
@@ -38,6 +39,7 @@ def main():
     parser.add_argument("--interval-sec", type=int, default=600, help="Loop interval seconds (default 10 min)")
     parser.add_argument("--live", action="store_true", help="Place orders; default is dry-run")
     parser.add_argument("--outside-rth", action="store_true", help="Allow orders outside regular trading hours")
+    parser.add_argument("--append-executions", action="store_true", help="After each cycle, fetch executions since SOD and append to log/CSV")
     parser.add_argument(
         "--market-hours-only",
         action="store_true",
@@ -65,9 +67,14 @@ def main():
     while True:
         loop_start = time.time()
         try:
+            # Heartbeat & market-hours gate
+            now_utc = dt.datetime.now(dt.timezone.utc)
             if args.market_hours_only:
-                now_utc = dt.datetime.utcnow().replace(tzinfo=dt.timezone.utc)
-                if not is_us_market_hours(now_utc, include_extended=args.include_extended):
+                allowed = is_us_market_hours(now_utc, include_extended=args.include_extended)
+                print(
+                    f"[daemon] {now_utc.isoformat()} market_hours_only=True include_extended={args.include_extended} allowed={allowed}"
+                )
+                if not allowed:
                     print("[daemon] Outside allowed trading hours; sleeping...")
                     time.sleep(args.interval_sec)
                     continue
@@ -83,7 +90,17 @@ def main():
             )
 
             # Run one rebalance pass
+            print(f"[daemon] Running rebalance pass for {args.ticker.upper()} (live={args.live})")
             run_once_rebalance(cfg)
+
+            # Append executions to log/CSV if requested
+            if args.append_executions:
+                try:
+                    since = yyyymmdd_hhmmss_et_start_of_day(0)
+                    appended = dump_executions_and_append(host=args.host, port=args.port, client_id=args.client_id, since=since)
+                    print(f"[daemon] appended {appended} executions to log/CSV")
+                except Exception as e:
+                    print(f"[daemon] append executions failed: {e}")
 
             # Simple cooldown guard for live mode
             if args.live:

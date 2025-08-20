@@ -1,2 +1,65 @@
-/Users/zengguowang/Quantify-Agent/ib_tqqq_daemon.py:69: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
-  now_utc = dt.datetime.utcnow().replace(tzinfo=dt.timezone.utc)
+[daemon] 2025-08-20T14:19:52.220917+00:00 market_hours_only=True include_extended=False allowed=True
+[daemon] Running rebalance pass for TQQQ (live=True)
+IB ERROR: reqId=-1, code=2104, msg=市场数据场连接正常:usfarm.nj
+IB ERROR: reqId=-1, code=2104, msg=市场数据场连接正常:hfarm
+IB ERROR: reqId=-1, code=2104, msg=市场数据场连接正常:cashfarm
+IB ERROR: reqId=-1, code=2104, msg=市场数据场连接正常:usfarm
+IB ERROR: reqId=-1, code=2106, msg=历史市场数据场连接正常:euhmds
+IB ERROR: reqId=-1, code=2106, msg=历史市场数据场连接正常:apachmds
+IB ERROR: reqId=-1, code=2106, msg=历史市场数据场连接正常:fundfarm
+IB ERROR: reqId=-1, code=2106, msg=历史市场数据场连接正常:ushmds
+IB ERROR: reqId=-1, code=2157, msg=Sec-def数据场连接中断:secdefhk
+IB ERROR: reqId=1, code=2176, msg=警告: 您的API版本不支持小数股交易数量。请至少升级到版本163。已将1798240.56调整为1798240
+IB ERROR: reqId=-1, code=2100, msg=API客户端已退订账户数据。
+=== Live Rebalance Preview ===
+Ticker: TQQQ
+NetLiq: $1,052,419.27
+Last Price: $86.13
+Current Shares: 4,804.00
+Model 5D Pred: -6.11%
+Target Exposure: 0.403
+No trade needed (within tolerance or too small).
+Dry-run mode: no order was sent.
+[exec_dump][error] code=2104 msg=市场数据场连接正常:usfarm.nj
+[exec_dump][error] code=2104 msg=市场数据场连接正常:hfarm
+[exec_dump][error] code=2104 msg=市场数据场连接正常:cashfarm
+[exec_dump][error] code=2104 msg=市场数据场连接正常:usfarm
+[exec_dump][error] code=2106 msg=历史市场数据场连接正常:euhmds
+[exec_dump][error] code=2106 msg=历史市场数据场连接正常:apachmds
+[exec_dump][error] code=2106 msg=历史市场数据场连接正常:fundfarm
+[exec_dump][error] code=2106 msg=历史市场数据场连接正常:ushmds
+[exec_dump][error] code=2157 msg=Sec-def数据场连接中断:secdefhk
+[daemon] appended 0 executions to log/CSV
+[daemon] 2025-08-20T14:29:53.070072+00:00 market_hours_only=True include_extended=False allowed=True
+[daemon] Running rebalance pass for TQQQ (live=True)
+IB ERROR: reqId=-1, code=2104, msg=市场数据场连接正常:usfarm.nj
+IB ERROR: reqId=-1, code=2104, msg=市场数据场连接正常:hfarm
+IB ERROR: reqId=-1, code=2104, msg=市场数据场连接正常:cashfarm
+IB ERROR: reqId=-1, code=2104, msg=市场数据场连接正常:usfarm
+IB ERROR: reqId=-1, code=2106, msg=历史市场数据场连接正常:euhmds
+IB ERROR: reqId=-1, code=2106, msg=历史市场数据场连接正常:apachmds
+IB ERROR: reqId=-1, code=2106, msg=历史市场数据场连接正常:fundfarm
+IB ERROR: reqId=-1, code=2106, msg=历史市场数据场连接正常:ushmds
+IB ERROR: reqId=-1, code=2157, msg=Sec-def数据场连接中断:secdefhk
+IB ERROR: reqId=1, code=2176, msg=警告: 您的API版本不支持小数股交易数量。请至少升级到版本163。已将1798240.56调整为1798240
+IB ERROR: reqId=-1, code=2100, msg=API客户端已退订账户数据。
+=== Live Rebalance Preview ===
+Ticker: TQQQ
+NetLiq: $1,053,284.21
+Last Price: $85.16
+Current Shares: 4,804.00
+Model 5D Pred: -6.01%
+Target Exposure: 0.405
+No trade needed (within tolerance or too small).
+Dry-run mode: no order was sent.
+[exec_dump][error] code=2104 msg=市场数据场连接正常:usfarm.nj
+[exec_dump][error] code=2104 msg=市场数据场连接正常:hfarm
+[exec_dump][error] code=2104 msg=市场数据场连接正常:cashfarm
+[exec_dump][error] code=2104 msg=市场数据场连接正常:usfarm
+[exec_dump][error] code=2106 msg=历史市场数据场连接正常:euhmds
+[exec_dump][error] code=2106 msg=历史市场数据场连接正常:apachmds
+[exec_dump][error] code=2106 msg=历史市场数据场连接正常:fundfarm
+[exec_dump][error] code=2106 msg=历史市场数据场连接正常:ushmds
+[exec_dump][error] code=2157 msg=Sec-def数据场连接中断:secdefhk
+[daemon] appended 0 executions to log/CSV
+[daemon] Live cooldown active (600s elapsed); no additional live orders will be placed until cooldown passes.
