@@ -5,3 +5,4 @@ scikit-learn==1.7.1
 matplotlib==3.10.5
 pandas-datareader==0.10.0
 
+ibapi==9.81.1.post1
