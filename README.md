@@ -3,6 +3,8 @@ AI quantitative trading strategies for US stocks
 ## 项目简介
 本项目 `Quantify-Agent` 是一个基于AI的美股量化交易策略系统，核心策略为**混合自适应机器学习驱动的TQQQ趋势增强策略**。系统集成了机器学习、动量、趋势跟踪、波动率控制等多因子信号，自动化回测与绩效分析，适合量化爱好者和研究者参考。
 
+<img width="2685" height="2082" alt="tqqq_final_strategy_comparison" src="https://github.com/user-attachments/assets/e8d0fb8b-51d8-4b09-ac90-f87fa08148a5" />
+
 ## 主要特性
 
 - **机器学习信号**：采用`RandomForestRegressor`对TQQQ未来收益概率建模，动态生成买卖信号。
