@@ -13,16 +13,16 @@ def load_data():
     """加载策略数据"""
     try:
         # 加载净值曲线
-        equity_df = pd.read_csv('/Users/zengguowang/strategy_results/hybrid_adaptive_ml_tqqq_equity.csv')
+        equity_df = pd.read_csv('/home/ubuntu/strategy_results/hybrid_adaptive_ml_tqqq_equity.csv')
         equity_df['date'] = pd.to_datetime(equity_df['date'])
         equity_df.set_index('date', inplace=True)
         
         # 加载交易记录
-        trades_df = pd.read_csv('/Users/zengguowang/strategy_results/hybrid_adaptive_ml_tqqq_trades.csv')
+        trades_df = pd.read_csv('/home/ubuntu/strategy_results/hybrid_adaptive_ml_tqqq_trades.csv')
         trades_df['date'] = pd.to_datetime(trades_df['date'])
         
         # 加载摘要信息
-        with open('/Users/zengguowang/strategy_results/hybrid_adaptive_ml_tqqq_summary.json', 'r') as f:
+        with open('/home/ubuntu/strategy_results/hybrid_adaptive_ml_tqqq_summary.json', 'r') as f:
             summary = json.load(f)
             
         return equity_df, trades_df, summary
@@ -127,7 +127,7 @@ def create_main_chart(equity_df, trades_df, summary):
     plt.tight_layout()
     
     # 保存图表
-    output_path = '/Users/zengguowang/strategy_results/hybrid_ml_strategy_main_chart.png'
+    output_path = '/home/ubuntu/strategy_results/hybrid_ml_strategy_main_chart.png'
     plt.savefig(output_path, dpi=300, bbox_inches='tight')
     print(f"主图已保存: {output_path}")
     

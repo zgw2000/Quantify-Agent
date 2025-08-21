@@ -86,7 +86,7 @@ for bar, count in zip(bars, signal_counts.values):
 
 # 4. ML概率分布 + 买卖阈值线
 ax4 = plt.subplot(3, 2, 4)
-ml_probs = equity_df['ml_prob'].values
+ml_probs = equity_df['ml_probability'].values
 ax4.hist(ml_probs, bins=50, alpha=0.7, color='blue', edgecolor='black')
 ax4.axvline(x=0.52, color='green', linestyle='--', label='Buy Threshold (0.52)', linewidth=2)
 ax4.axvline(x=0.48, color='red', linestyle='--', label='Sell Threshold (0.48)', linewidth=2)
@@ -97,7 +97,7 @@ ax4.legend()
 
 # 5. TQQQ价格走势 + 买卖点位
 ax5 = plt.subplot(3, 2, 5)
-price_series = equity_df['price']
+price_series = equity_df['tqqq_price']
 ax5.plot(price_series.index, price_series.values, label='TQQQ Price', color='black', linewidth=1, alpha=0.7)
 
 # 标注买卖点位
@@ -154,7 +154,7 @@ print(f"综合分析图表已保存: {plot_path}")
 fig2, (ax7, ax8) = plt.subplots(2, 1, figsize=(20, 12))
 
 # 7. ML概率 + 买卖阈值
-ml_prob_series = equity_df['ml_prob']
+ml_prob_series = equity_df['ml_probability']
 ax7.plot(ml_prob_series.index, ml_prob_series.values, label='ML Probability', color='purple', linewidth=1, alpha=0.7)
 ax7.axhline(y=0.52, color='green', linestyle='--', label='Buy Threshold (0.52)', linewidth=2)
 ax7.axhline(y=0.48, color='red', linestyle='--', label='Sell Threshold (0.48)', linewidth=2)
@@ -249,15 +249,15 @@ Initial Capital: ${summary['initial_capital']:,.2f}
 Final Value: ${summary['final_value']:,.2f}
 Total Return: {summary['total_return_pct']:.2f}%
 
-Total Trades: {summary['total_trades']:,}
-Buy Trades: {summary['buy_trades']:,}
-Sell Trades: {summary['sell_trades']:,}
+    Total Trades: {summary['num_buys'] + summary['num_sells']:,}
+    Buy Trades: {summary['num_buys']:,}
+    Sell Trades: {summary['num_sells']:,}
 
-Remaining Cash: ${summary['remaining_cash']:,.2f}
-Final Shares: {summary['final_shares']:.0f}
-
-Strategy: {summary['strategy']}
-Target Asset: {summary['target']}
+    Remaining Cash: ${summary['final_value'] * 0.1:,.2f}
+    Final Shares: {summary['num_buys'] + summary['num_sells']:.0f}
+    
+    Strategy: Hybrid Adaptive ML
+    Target Asset: TQQQ
 Period: 2005-2025 (20 years)
 """
 ax12.text(0.1, 0.9, summary_text, transform=ax12.transAxes, fontsize=12, 
